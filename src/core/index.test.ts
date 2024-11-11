@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, SpyInstance } from 'vitest';
 import { z } from 'zod';
 import { EnvValidator, createEnvValidator } from './index';
 
@@ -564,5 +564,306 @@ describe('EnvValidator', () => {
 
       expect(time1).toBe(time2); // Should return cached value
     });
+  });
+});
+
+describe('NX Workspace Support', () => {
+  let mockDotenvConfig = vi.fn();
+  let mockLoadEnvFile: SpyInstance;
+
+  beforeEach(() => {
+    vi.mock('dotenv', () => ({
+      config: mockDotenvConfig
+    }));
+
+    // Create a spy on loadEnvFile
+    mockLoadEnvFile = vi.spyOn(EnvValidator.prototype as any, 'loadEnvFile');
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    mockLoadEnvFile.mockRestore();
+  });
+
+  it('should load workspace root env variables', () => {
+    const mockedEnv = {
+      NX_ROOT_VAR: 'root-value',
+      DATABASE_URL: 'root-db-url'
+    };
+
+    // Reset process.env
+    process.env = {};
+
+    // Mock both dotenv.config and loadEnvFile
+    mockDotenvConfig.mockReturnValue({
+      parsed: mockedEnv
+    });
+
+    mockLoadEnvFile.mockImplementation((path: string) => {
+      mockDotenvConfig({ path: `${path}/.env` });
+      return mockedEnv;
+    });
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          workspaceRoot: '/workspace-root',
+          cascadeEnv: true
+        }
+      },
+      server: {
+        NX_ROOT_VAR: z.string(),
+        DATABASE_URL: z.string()
+      }
+    });
+
+    const env = validator.parse();
+    
+    expect(env['NX_ROOT_VAR']).toBe('root-value');
+    expect(env['DATABASE_URL']).toBe('root-db-url');
+    expect(mockLoadEnvFile).toHaveBeenCalledWith('/workspace-root');
+    expect(mockDotenvConfig).toHaveBeenCalledWith({
+      path: '/workspace-root/.env'
+    });
+  });
+
+  it('should cascade env variables correctly', () => {
+    const rootEnv = {
+      NX_ROOT_VAR: 'root-value',
+      DATABASE_URL: 'root-db-url'
+    };
+
+    const projectEnv = {
+      DATABASE_URL: 'project-db-url',
+      PROJECT_SPECIFIC: 'project-value'
+    };
+
+    // Mock root .env
+    mockDotenvConfig
+      .mockReturnValueOnce({
+        parsed: rootEnv
+      })
+      // Mock project .env
+      .mockReturnValueOnce({
+        parsed: projectEnv
+      });
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          workspaceRoot: '/workspace-root',
+          projectPath: '/workspace-root/apps/my-app',
+          cascadeEnv: true
+        }
+      },
+      server: {
+        NX_ROOT_VAR: z.string(),
+        DATABASE_URL: z.string(),
+        PROJECT_SPECIFIC: z.string()
+      },
+      // Merge the environments as they would be in reality
+      runtimeEnv: {
+        ...rootEnv,
+        ...projectEnv
+      }
+    });
+
+    const env = validator.parse();
+    expect(env['NX_ROOT_VAR']).toBe('root-value');
+    expect(env['DATABASE_URL']).toBe('project-db-url'); // Project value should override root
+    expect(env['PROJECT_SPECIFIC']).toBe('project-value');
+  });
+
+  it('should handle missing .env files gracefully', () => {
+    mockDotenvConfig
+      .mockReturnValueOnce({ parsed: null }) // Root .env not found
+      .mockReturnValueOnce({ parsed: null }); // Project .env not found
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          workspaceRoot: '/workspace-root',
+          projectPath: '/workspace-root/apps/my-app',
+          cascadeEnv: true
+        }
+      },
+      server: {
+        OPTIONAL_VAR: z.string().optional()
+      }
+    });
+
+    expect(() => validator.parse()).not.toThrow();
+  });
+
+  it('should respect cascadeEnv flag', () => {
+    const rootEnv = {
+      ROOT_VAR: 'root-value'
+    };
+
+    const projectEnv = {
+      PROJECT_VAR: 'project-value'
+    };
+
+    // Reset process.env
+    process.env = {};
+
+    mockDotenvConfig
+      .mockReturnValueOnce({
+        parsed: rootEnv
+      })
+      .mockReturnValueOnce({
+        parsed: projectEnv
+      });
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          workspaceRoot: '/workspace-root',
+          projectPath: '/workspace-root/apps/my-app',
+          cascadeEnv: false // Disable cascading
+        }
+      },
+      server: {
+        ROOT_VAR: z.string().optional(),
+        PROJECT_VAR: z.string()
+      },
+      runtimeEnv: projectEnv // Only include project env since cascading is disabled
+    });
+
+    const env = validator.parse();
+    expect(env['ROOT_VAR']).toBeUndefined(); // Should not load root variables
+    expect(env['PROJECT_VAR']).toBe('project-value');
+  });
+
+  it('should handle NX public variables correctly', () => {
+    const mockedEnv = {
+      NX_PUBLIC_API_URL: 'https://api.example.com',
+      PRIVATE_VAR: 'secret'
+    };
+
+    // Reset process.env
+    process.env = {};
+
+    mockDotenvConfig.mockReturnValue({
+      parsed: mockedEnv
+    });
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          projectPath: '/workspace-root/apps/my-app'
+        }
+      },
+      client: {
+        NX_PUBLIC_API_URL: z.string()
+      },
+      server: {
+        PRIVATE_VAR: z.string()
+      },
+      runtimeEnv: mockedEnv
+    });
+
+    const env = validator.parse();
+    expect(env['NX_PUBLIC_API_URL']).toBe('https://api.example.com');
+    expect(env['PRIVATE_VAR']).toBe('secret');
+  });
+
+  it('should validate environment access in different NX environments', () => {
+    const mockedEnv = {
+      SERVER_ONLY: 'secret',
+      NX_PUBLIC_VAR: 'public'
+    };
+
+    // Reset process.env
+    process.env = {};
+
+    mockDotenvConfig.mockReturnValue({
+      parsed: mockedEnv
+    });
+
+    // Simulate browser environment
+    global.window = {} as Window & typeof globalThis;
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          projectPath: '/workspace-root/apps/my-app'
+        }
+      },
+      server: {
+        SERVER_ONLY: z.string()
+      },
+      client: {
+        NX_PUBLIC_VAR: z.string()
+      },
+      runtimeEnv: mockedEnv
+    });
+
+    const env = validator.parse();
+    expect(env['NX_PUBLIC_VAR']).toBe('public');
+    expect(() => env['SERVER_ONLY']).toThrow();
+  });
+
+  it('should handle complex NX workspace configurations', () => {
+    const rootEnv = {
+      NX_ROOT_VAR: 'root-value',
+      SHARED_VAR: 'root-shared'
+    };
+
+    const projectEnv = {
+      NX_PUBLIC_API_URL: 'https://project-api.example.com',
+      SHARED_VAR: 'project-shared',
+      PROJECT_SPECIFIC: 'project-value'
+    };
+
+    // Reset process.env and ensure we're in a server environment
+    process.env = {};
+    // @ts-ignore - Remove window to simulate server environment
+    delete global.window;
+
+    mockDotenvConfig
+      .mockReturnValueOnce({
+        parsed: rootEnv
+      })
+      .mockReturnValueOnce({
+        parsed: projectEnv
+      });
+
+    const validator = createEnvValidator({
+      framework: {
+        framework: 'nx',
+        nxConfig: {
+          workspaceRoot: '/workspace-root',
+          projectPath: '/workspace-root/apps/my-app',
+          cascadeEnv: true
+        }
+      },
+      server: {
+        NX_ROOT_VAR: z.string(),
+        SHARED_VAR: z.string(),
+        PROJECT_SPECIFIC: z.string()
+      },
+      client: {
+        NX_PUBLIC_API_URL: z.string()
+      },
+      runtimeEnv: {
+        ...rootEnv,
+        ...projectEnv // Project env overrides root env
+      }
+    });
+
+    const env = validator.parse();
+    
+    // Now we can access server variables because we're in a server environment
+    expect(env['NX_ROOT_VAR']).toBe('root-value');
+    expect(env['SHARED_VAR']).toBe('project-shared');
+    expect(env['PROJECT_SPECIFIC']).toBe('project-value');
+    expect(env['NX_PUBLIC_API_URL']).toBe('https://project-api.example.com');
   });
 });

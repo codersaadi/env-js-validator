@@ -54,7 +54,8 @@ export interface FrameworkPreset {
 
 // Framework configuration with overrides
 export interface FrameworkConfig extends Partial<FrameworkPreset> {
-  framework: SupportedFrameworks ;
+  framework: SupportedFrameworks;
+  nxConfig?: NXWorkspaceConfig;
 }
 
 // Framework presets
@@ -88,6 +89,11 @@ export const FRAMEWORK_PRESETS = {
     clientPrefix: 'NX_PUBLIC_',
     runtimeEnv: 'process.env' as const,
     allowedEnvironments: ['node', 'browser'] as const,
+    workspaceConfig: {
+      rootEnvPath: true,      // whether to load workspace root .env
+      cascadeEnv: true,       // whether to cascade env variables
+      projectEnvPath: true,   // whether to load project-specific .env
+    }
   },
   nuxt: {
     clientPrefix: 'NUXT_PUBLIC_',
@@ -106,6 +112,13 @@ export type SupportedFrameworks = keyof typeof FRAMEWORK_PRESETS;
 export type FrameworkPrefix<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['clientPrefix'];
 export type FrameworkEnv<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['runtimeEnv'];
 export type FrameworkAllowedEnvs<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['allowedEnvironments'][number];
+
+// Add new interface for NX workspace configuration
+export interface NXWorkspaceConfig {
+  workspaceRoot?: string;
+  projectPath?: string;
+  cascadeEnv?: boolean;
+}
 
 export class EnvValidator<
   TServer extends Record<string, ZodType>,
@@ -214,12 +227,31 @@ export class EnvValidator<
 
     let env: Record<string, unknown> = {};
 
-    // Process.env (Node.js)
+    // Handle NX workspace environment loading
+    if (
+      this.config.framework &&
+      typeof this.config.framework === 'object' &&
+      this.config.framework.framework === 'nx' &&
+      this.config.framework.nxConfig
+    ) {
+      const { workspaceRoot, projectPath, cascadeEnv } = this.config.framework.nxConfig;
+
+      // Load workspace root .env if exists
+      if (workspaceRoot && cascadeEnv) {
+        env = { ...env, ...this.loadEnvFile(workspaceRoot) };
+      }
+
+      // Load project-specific .env if exists
+      if (projectPath) {
+        env = { ...env, ...this.loadEnvFile(projectPath) };
+      }
+    }
+
+    // Existing environment loading logic
     if (typeof process !== 'undefined' && process.env) {
       env = { ...env, ...process.env };
     }
 
-    // Import.meta.env (Vite/Browser)
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       env = { ...env, ...import.meta.env };
     }
@@ -232,6 +264,18 @@ export class EnvValidator<
     }
 
     return env;
+  }
+
+  // Add helper method to load .env files
+  private loadEnvFile(path: string): Record<string, unknown> {
+    try {
+      // Make sure we're calling dotenv.config with the correct path
+      const result = require('dotenv').config({ path: `${path}/.env` });
+      return result.parsed || {};
+    } catch (error) {
+      console.warn(`Failed to load .env file from ${path}`, error);
+      return {};
+    }
   }
 
   private validateAccess(key: string): void {
