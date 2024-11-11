@@ -18,6 +18,6 @@ export default defineConfig({
   },
   // Environment variables to define
   define: {
-    "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV),
+    "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "deployment"),
   },
 });
