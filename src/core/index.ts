@@ -17,7 +17,7 @@ type FrameworkConfig = {
   monorepo?: MonorepoConfig;
   envFilePath?: string | string[];
 };
-
+type SupportedFrameworks = "next" | "remix" | "react" | "vue" | "solid" | "nx" | "nuxt" | "custom"
 const FRAMEWORK_CONFIGS: Record<string, FrameworkConfig> = {
   next: {
     clientPrefix: 'NEXT_PUBLIC_',
@@ -51,7 +51,13 @@ const FRAMEWORK_CONFIGS: Record<string, FrameworkConfig> = {
     defaultValidation: true,
     envFilePath: ['apps/${project}/.env', 'libs/${workspace}/.env'],
   },
-};
+  nuxt: {
+    clientPrefix: 'NUXT_PUBLIC_',
+    runtimeEnv: 'process.env',
+    allowedEnvironments: ['node', 'browser'],
+    defaultValidation: true,
+  },
+} ;
 
 interface MonorepoConfig {
   project?: string;
@@ -70,14 +76,17 @@ export interface EnvValidatorOptions<
   shared?: TSharedSchema;
   clientPrefix?: string;
   runtimeEnv?: Record<string, unknown>;
-  framework?: keyof typeof FRAMEWORK_CONFIGS;
+  framework?: SupportedFrameworks;
   emptyStringAsUndefined?: boolean;
   allowedEnvironments?: RuntimeEnvironment[];
   onValidationError?: (error: ZodError) => never;
   onInvalidAccess?: (variable: string, context: string) => never;
   monorepo?: MonorepoConfig;
   loadEnvFiles?: boolean;
+  transformers?: Record<string, EnvTransformer>;
 }
+
+export type EnvTransformer = (value: unknown, key: string) => unknown;
 
 export class EnvValidator<
   TServerSchema extends Record<string, ZodType>,
@@ -106,6 +115,7 @@ export class EnvValidator<
       onInvalidAccess: options.onInvalidAccess ?? this.defaultInvalidAccess,
       monorepo: options.monorepo ?? {},
       loadEnvFiles: options.loadEnvFiles || false,
+      transformers: options.transformers ?? {},
     };
 
     this.serverSchema = z.object(this.options.server);
@@ -188,14 +198,28 @@ export class EnvValidator<
       });
     }
 
+    // Apply custom transformers
+    if (this.options.transformers) {
+      Object.entries(transformed).forEach(([key, value]) => {
+        if (key in this.options.transformers!) {
+          transformed[key] = this.options?.transformers?.[key]?.(value, key);
+        }
+      });
+    }
+
     return transformed;
   }
 
   private validateAccess(key: string): void {
-    const isServerVar = !key.startsWith(this.options.clientPrefix) && !(key in this.options.shared);
     const environment = this.getCurrentEnvironment();
-    if (isServerVar && environment !== 'browser') {
-      this.options.onInvalidAccess?.(key, environment);
+    
+    // Check if the variable is server-only (not in client or shared schemas)
+    const isServerVar = key in this.options.server && 
+      !(key in this.options.client) && 
+      !(key in this.options.shared);
+
+    if (isServerVar && environment === 'browser') {
+      this.options.onInvalidAccess(key, environment);
     }
   }
 
@@ -264,6 +288,11 @@ export class EnvValidator<
       }
     }
     return this.validationResult ?? { success: true, errors: [] };
+  }
+
+  public setRuntimeEnv(env: Record<string, unknown>): void {
+    this.options.runtimeEnv = this.transformEnv(env);
+    this.validationResult = null; // Reset validation state
   }
 }
 

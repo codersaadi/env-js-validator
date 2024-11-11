@@ -188,27 +188,6 @@ describe('EnvValidator', () => {
       expect(state.success).toBe(true);
       expect(state.errors).toBeUndefined();
     });
-
-    // it('should return error validation state when invalid', () => {
-    //   process.env["API_KEY"] = ""
-      
-    //   const validator = createEnvValidator({
-    //     server: {
-    //       API_KEY: z.string().min(1),
-    //     },
-    //     emptyStringAsUndefined: false,
-    //   });
-
-    //   const state = validator.getValidationState();
-    //   expect(state.success).toBe(false);
-    //   expect(state.errors).toBeDefined();
-    //   console.log(state.errors);
-      
-    //   expect(state.errors?.[0]).toMatchObject({
-    //     path: ['API_KEY'],
-    //     message: expect.any(String),
-    //   });
-    // });
   });
 
   describe('Framework-specific behavior', () => {
@@ -254,5 +233,129 @@ describe('EnvValidator', () => {
       expect(env.VITE_API_URL).toBe('https://vite-api.example.com');
     });
     
+  });
+
+  describe('Error Handling', () => {
+    it('should handle custom validation error handler', () => {
+      const customErrorHandler = vi.fn((error: z.ZodError) => {
+        throw new Error('Custom validation error');
+      });
+
+      const validator = createEnvValidator({
+        server: {
+          MISSING_VAR: z.string(),
+        },
+        onValidationError: customErrorHandler,
+      });
+
+      expect(() => validator.parse()).toThrow('Custom validation error');
+      expect(customErrorHandler).toHaveBeenCalled();
+    });
+
+    it('should handle custom invalid access handler', () => {
+      const customAccessHandler = vi.fn((variable: string, context: string): never => {
+        throw new Error(`Custom access error: ${variable} in ${context}`);
+      });
+
+      // Mock window to simulate browser environment
+      global.window = {} as Window & typeof globalThis;
+      
+      const validator = createEnvValidator({
+        server: {
+          SECRET_KEY: z.string(),
+        },
+        onInvalidAccess: customAccessHandler,
+        runtimeEnv: {
+          SECRET_KEY: 'test-secret'
+        }
+      });
+
+      const env = validator.parse();
+      
+      // Wrap the access in a function to properly catch the error
+      function accessServerVar() {
+        return env.SECRET_KEY;
+      }
+
+      expect(accessServerVar).toThrow('Custom access error: SECRET_KEY in browser');
+      expect(customAccessHandler).toHaveBeenCalledWith('SECRET_KEY', 'browser');
+    });
+  });
+
+  describe('Environment Detection and Loading', () => {
+    it('should properly merge multiple environment sources', () => {
+      // Setup process.env
+      const testProcessEnv = {
+        FROM_PROCESS: 'process',
+        NODE_ENV: 'test'
+      };
+
+      // Setup import.meta.env
+      const testImportMetaEnv = {
+        FROM_IMPORT_META: 'import.meta'
+      };
+
+      const validator = createEnvValidator({
+        server: {
+          FROM_PROCESS: z.string(),
+          FROM_IMPORT_META: z.string(),
+        },
+        // Explicitly provide the merged runtime environment
+        runtimeEnv: {
+          ...testProcessEnv,
+          ...testImportMetaEnv
+        }
+      });
+
+      const env = validator.parse();
+      expect(env.FROM_PROCESS).toBe('process');
+      expect(env.FROM_IMPORT_META).toBe('import.meta');
+    });
+
+    it('should handle empty string to undefined conversion correctly', () => {
+      process.env["EMPTY_STRING"] = '';
+      process.env["NON_EMPTY"] = 'value';
+
+      const validator = createEnvValidator({
+        server: {
+          EMPTY_STRING: z.string().optional(),
+          NON_EMPTY: z.string(),
+        },
+        emptyStringAsUndefined: true,
+      });
+
+      const env = validator.parse();
+      expect(env.EMPTY_STRING).toBeUndefined();
+      expect(env.NON_EMPTY).toBe('value');
+    });
+  });
+
+  describe('Schema Validation', () => {
+    it('should validate shared variables across all environments', () => {
+      const validator = createEnvValidator({
+        shared: {
+          NODE_ENV: z.enum(['development', 'test', 'production']),
+        },
+      });
+
+      const env = validator.parse();
+      expect(env.NODE_ENV).toBe('test');
+    });
+
+    it('should handle complex schema validations', () => {
+      process.env["PORT"] = '3000';
+      process.env["FEATURE_FLAGS"] = '{"debug":true,"beta":false}';
+
+      const validator = createEnvValidator({
+        server: {
+          PORT: z.string().transform(val => parseInt(val, 10)),
+          FEATURE_FLAGS: z.string().transform(val => JSON.parse(val)),
+        },
+      });
+
+      const env = validator.parse();
+      expect(env.PORT).toBe(3000);
+      expect(env.FEATURE_FLAGS).toEqual({ debug: true, beta: false });
+    });
   });
 });
