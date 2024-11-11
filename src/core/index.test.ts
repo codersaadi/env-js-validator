@@ -41,7 +41,9 @@ describe('EnvValidator', () => {
 
   describe('Constructor', () => {
     it('should initialize with default options', () => {
-      const validator = new EnvValidator({});
+      const validator = new EnvValidator({
+        
+      });
       expect(validator).toBeInstanceOf(EnvValidator);
     });
 
@@ -59,7 +61,8 @@ describe('EnvValidator', () => {
 
       expect(() => new EnvValidator({
         ...schema,
-        framework: 'next',
+        framework: "next",
+        
       })).toThrow(/must be prefixed/);
     });
   });
@@ -72,12 +75,12 @@ describe('EnvValidator', () => {
     });
 
     it('should detect browser environment', () => {
-       
       global.window = {} as Window & typeof globalThis;
       const validator = createEnvValidator({
         client: {
           VITE_APP_TITLE: z.string(),
         },
+        framework: "vue",
       });
       const env = validator.parse();
       expect(env).toBeDefined();
@@ -98,7 +101,6 @@ describe('EnvValidator', () => {
         DATABASE_URL: z.string().url(),
       },
       client: {
-        PUBLIC_API_URL: z.string().url(),
         VITE_APP_TITLE: z.string(),
       },
       shared: {
@@ -107,72 +109,78 @@ describe('EnvValidator', () => {
     };
 
     it('should validate correct environment variables', () => {
-      const validator = createEnvValidator(schema);
+      const validator = createEnvValidator({
+        ...schema,
+        framework: 'vue'
+      });
       const env = validator.parse();
-       
-      expect(env.API_KEY).toBe('secret-key');
-      expect(env.DATABASE_URL).toBe('postgresql://localhost:5432');
-      expect(env.PUBLIC_API_URL).toBe('https://api.example.com');
-      expect(env.NODE_ENV).toBe('test');
+      expect(env["API_KEY"]).toBe('secret-key');
+      expect(env["DATABASE_URL"]).toBe('postgresql://localhost:5432');
+      expect(env["NODE_ENV"]).toBe('test');
     });
 
     it('should handle empty strings as undefined when emptyStringAsUndefined is true', () => {
       const validator = createEnvValidator({
         ...schema,
+        framework: 'vue',
         emptyStringAsUndefined: true,
       });
-      const env = validator.parse() ;
-      // @ts-ignore
-      const expectedValue = env[""]
-      expect(expectedValue).toBeUndefined();
+      const env = validator.parse();
+      expect(env['']).toBeUndefined();
     });
 
     it('should throw on invalid environment variables', () => {
       process.env["DATABASE_URL"] = 'invalid-url';
-      
       const validator = createEnvValidator({
         ...schema,
+        framework: 'vue',
         onValidationError: (error) => {
           throw error;
         },
       });
-      
       expect(() => validator.parse()).toThrow();
     });
   });
 
   describe('Access Control', () => {
     it('should prevent access to server variables in browser environment', () => {
-      const validator = new EnvValidator({
-        server: {
-          API_KEY: z.string(),
-        },
-        client: {
-          PUBLIC_API_URL: z.string(),
-        },
-        runtimeEnv: { PUBLIC_API_URL: 'https://api.example.com', API_KEY: 'secret-key2' },
-      });
-    
-      const env = validator.parse();
-    
-      // Validate that accessing a server-only variable in a browser throws an error
-      expect(() => env.API_KEY).toThrowError;
-      expect(env.PUBLIC_API_URL).toBe('https://api.example.com');
-    });
-    
-    it('should allow access to all variables in server environment', () => {
+      global.window = {} as Window & typeof globalThis;
       const validator = createEnvValidator({
         server: {
-          API_KEY: z.string(),
+          SECRET_KEY: z.string(),
         },
         client: {
-          PUBLIC_API_URL: z.string(),
+          VITE_PUBLIC_KEY: z.string(),
         },
+        framework: 'vue',
+        runtimeEnv: {
+          SECRET_KEY: 'secret',
+          VITE_PUBLIC_KEY: 'public'
+        }
       });
 
       const env = validator.parse();
-      expect(env.API_KEY).toBe('secret-key');
-      expect(env.PUBLIC_API_URL).toBe('https://api.example.com');
+      expect(() => env["SECRET_KEY"]).toThrow();
+    });
+
+    it('should allow access to all variables in server environment', () => {
+      const validator = createEnvValidator({
+        server: {
+          SECRET_KEY: z.string(),
+        },
+        client: {
+          VITE_PUBLIC_KEY: z.string(),
+        },
+        framework: 'vue',
+        runtimeEnv: {
+          SECRET_KEY: 'secret',
+          VITE_PUBLIC_KEY: 'public'
+        }
+      });
+
+      const env = validator.parse();
+      expect(env["SECRET_KEY"]).toBe('secret');
+      expect(env["VITE_PUBLIC_KEY"]).toBe('public');
     });
   });
 
@@ -197,12 +205,12 @@ describe('EnvValidator', () => {
         NEXT_PUBLIC_API_URL : "https://next-api.example.com"
       }
 
-      const validator = createEnvValidator({ framework : "next", allowedEnvironments :[
-        "browser" , "node",
-      ] ,
+      const validator = createEnvValidator({
       client : {
-        NEXT_PUBLIC_API_URL : z.string()
-      }
+        NEXT_PUBLIC_API_URL : z.string(),
+      },
+      framework: "next",
+      // clientPrefix: "NEXT_PUBLIC_"
     });
   const env = validator.parse()
       
@@ -221,23 +229,24 @@ describe('EnvValidator', () => {
       });
 
       const validator = createEnvValidator({
-        framework: "vue",
-        allowedEnvironments: ['browser', 'node'], // Include 'node' for test context
-
         client: {
           VITE_API_URL: z.string(),
+        },
+        framework: "vue",
+        runtimeEnv: {
+          VITE_API_URL: 'https://vite-api.example.com',
         },
       });
       
       const env = validator.parse();
-      expect(env.VITE_API_URL).toBe('https://vite-api.example.com');
+      expect(env['VITE_API_URL']).toBe('https://vite-api.example.com');
     });
     
   });
 
   describe('Error Handling', () => {
     it('should handle custom validation error handler', () => {
-      const customErrorHandler = vi.fn((error: z.ZodError) => {
+      const customErrorHandler = vi.fn((_: z.ZodError) => {
         throw new Error('Custom validation error');
       });
 
@@ -274,7 +283,7 @@ describe('EnvValidator', () => {
       
       // Wrap the access in a function to properly catch the error
       function accessServerVar() {
-        return env.SECRET_KEY;
+        return env["SECRET_KEY"];
       }
 
       expect(accessServerVar).toThrow('Custom access error: SECRET_KEY in browser');
@@ -308,8 +317,8 @@ describe('EnvValidator', () => {
       });
 
       const env = validator.parse();
-      expect(env.FROM_PROCESS).toBe('process');
-      expect(env.FROM_IMPORT_META).toBe('import.meta');
+      expect(env["FROM_PROCESS"]).toBe('process');
+      expect(env["FROM_IMPORT_META"]).toBe('import.meta');
     });
 
     it('should handle empty string to undefined conversion correctly', () => {
@@ -325,8 +334,8 @@ describe('EnvValidator', () => {
       });
 
       const env = validator.parse();
-      expect(env.EMPTY_STRING).toBeUndefined();
-      expect(env.NON_EMPTY).toBe('value');
+      expect(env["EMPTY_STRING"]).toBeUndefined();
+      expect(env["NON_EMPTY"]).toBe('value');
     });
   });
 
@@ -339,7 +348,7 @@ describe('EnvValidator', () => {
       });
 
       const env = validator.parse();
-      expect(env.NODE_ENV).toBe('test');
+      expect(env["NODE_ENV"]).toBe('test');
     });
 
     it('should handle complex schema validations', () => {
@@ -354,8 +363,8 @@ describe('EnvValidator', () => {
       });
 
       const env = validator.parse();
-      expect(env.PORT).toBe(3000);
-      expect(env.FEATURE_FLAGS).toEqual({ debug: true, beta: false });
+      expect(env["PORT"]).toBe(3000);
+      expect(env["FEATURE_FLAGS"]).toEqual({ debug: true, beta: false });
     });
   });
 });

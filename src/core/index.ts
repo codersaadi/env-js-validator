@@ -1,307 +1,277 @@
-import { type ZodError, type ZodType, z } from 'zod';
+import { z, type ZodError, type ZodType, type ZodObject } from 'zod';
 
+// Type utilities
+export type Simplify<T> = { [P in keyof T]: T[P] } & {};
+// type Impossible<T> = Partial<Record<keyof T, never>>;
+
+// Environment types
 export type RuntimeEnvironment = 'node' | 'edge' | 'browser' | 'deno';
 export type EnvSource = 'process.env' | 'import.meta.env' | 'Deno.env' | 'custom';
 
-interface ValidationResult {
-  success: boolean;
-  errors?: Array<{ path: string[]; message: string }>;
+// Base configuration interface
+export interface BaseConfig {
+  isServer?: boolean;
+  skipValidation?: boolean;
+  emptyStringAsUndefined?: boolean;
+  onValidationError?: (error: ZodError) => never;
+  onInvalidAccess?: (variable: string, context: RuntimeEnvironment) => never;
 }
 
-// Helper for framework-specific configuration
-type FrameworkConfig = {
-  clientPrefix: string;
-  runtimeEnv: EnvSource;
-  defaultValidation?: boolean;
-  allowedEnvironments?: RuntimeEnvironment[];
-  monorepo?: MonorepoConfig;
-  envFilePath?: string | string[];
-};
-type SupportedFrameworks = "next" | "remix" | "react" | "vue" | "solid" | "nx" | "nuxt" | "custom"
-const FRAMEWORK_CONFIGS: Record<string, FrameworkConfig> = {
-  next: {
-    clientPrefix: 'NEXT_PUBLIC_',
-    runtimeEnv: 'process.env',
-    allowedEnvironments: ['node', 'edge'],
-  },
-  remix: {
-    clientPrefix: 'PUBLIC_',
-    runtimeEnv: 'process.env',
-    allowedEnvironments: ['node', 'browser'],
-  },
-  react: {
-    clientPrefix: 'REACT_APP_',
-    runtimeEnv: 'process.env',
-    allowedEnvironments: ['browser'],
-  },
-  vue: {
-    clientPrefix: 'VITE_',
-    runtimeEnv: 'import.meta.env',
-    allowedEnvironments: ['browser'],
-  },
-  solid: {
-    clientPrefix: 'VITE_',
-    runtimeEnv: 'import.meta.env',
-    allowedEnvironments: ['browser'],
-  },
-  nx: {
-    clientPrefix: 'NX_PUBLIC_',
-    runtimeEnv: 'process.env',
-    allowedEnvironments: ['node', 'browser'],
-    defaultValidation: true,
-    envFilePath: ['apps/${project}/.env', 'libs/${workspace}/.env'],
-  },
-  nuxt: {
-    clientPrefix: 'NUXT_PUBLIC_',
-    runtimeEnv: 'process.env',
-    allowedEnvironments: ['node', 'browser'],
-    defaultValidation: true,
-  },
-} ;
-
-interface MonorepoConfig {
-  project?: string;
-  workspace?: string;
-  envFilePath?: string | string[];
-  shared?: boolean;
-}
-
-export interface EnvValidatorOptions<
-  TServerSchema extends Record<string, ZodType>,
-  TClientSchema extends Record<string, ZodType>,
-  TSharedSchema extends Record<string, ZodType>
+// Schema configuration
+export interface SchemaConfig<
+  TServer extends Record<string, ZodType> = Record<string, ZodType>,
+  TClient extends Record<string, ZodType> = Record<string, ZodType>,
+  TShared extends Record<string, ZodType> = Record<string, ZodType>
 > {
-  server?: TServerSchema;
-  client?: TClientSchema;
-  shared?: TSharedSchema;
+  server?: TServer;
+  client?: TClient;
+  shared?: TShared;
   clientPrefix?: string;
+}
+
+// Runtime environment configuration
+export interface RuntimeConfig {
   runtimeEnv?: Record<string, unknown>;
   framework?: SupportedFrameworks;
-  emptyStringAsUndefined?: boolean;
-  allowedEnvironments?: RuntimeEnvironment[];
-  onValidationError?: (error: ZodError) => never;
-  onInvalidAccess?: (variable: string, context: string) => never;
-  monorepo?: MonorepoConfig;
-  loadEnvFiles?: boolean;
-  transformers?: Record<string, EnvTransformer>;
 }
 
-export type EnvTransformer = (value: unknown, key: string) => unknown;
+// Combined configuration type
+export type EnvConfig<
+  TServer extends Record<string, ZodType> = Record<string, ZodType>,
+  TClient extends Record<string, ZodType> = Record<string, ZodType>,
+  TShared extends Record<string, ZodType> = Record<string, ZodType>
+> = BaseConfig & SchemaConfig<TServer, TClient, TShared> & {
+  runtimeEnv?: Record<string, unknown>;
+  framework?: SupportedFrameworks;
+};
 
 export class EnvValidator<
-  TServerSchema extends Record<string, ZodType>,
-  TClientSchema extends Record<string, ZodType>,
-  TSharedSchema extends Record<string, ZodType>
+  TServer extends Record<string, ZodType>,
+  TClient extends Record<string, ZodType>,
+  TShared extends Record<string, ZodType>
 > {
-  private serverSchema: z.ZodObject<TServerSchema>;
-  private clientSchema: z.ZodObject<TClientSchema>;
-  private sharedSchema: z.ZodObject<TSharedSchema>;
-  private options: Required<EnvValidatorOptions<TServerSchema, TClientSchema, TSharedSchema>>;
-  private validationResult: ValidationResult | null = null;
+  private readonly config: EnvConfig<TServer, TClient, TShared>;
+  private cache = new Map<string, unknown>();
+  private schema: ZodObject<TServer & TClient & TShared>;
+  private environment: RuntimeEnvironment;
 
-  constructor(options: EnvValidatorOptions<TServerSchema, TClientSchema, TSharedSchema>) {
-    const frameworkConfig = options.framework ? FRAMEWORK_CONFIGS[options.framework] : null;
-
-    this.options = {
-      server: options.server ?? ({} as TServerSchema),
-      client: options.client ?? ({} as TClientSchema),
-      shared: options.shared ?? ({} as TSharedSchema),
-      clientPrefix: options.clientPrefix ?? frameworkConfig?.clientPrefix ?? '',
-      runtimeEnv: options.runtimeEnv ?? this.detectRuntimeEnv(),
-      framework: options.framework ?? 'custom',
-      emptyStringAsUndefined: options.emptyStringAsUndefined ?? true,
-      allowedEnvironments: options.allowedEnvironments ?? frameworkConfig?.allowedEnvironments ?? ['node', 'edge', 'browser', 'deno'],
-      onValidationError: options.onValidationError ?? this.defaultValidationError,
-      onInvalidAccess: options.onInvalidAccess ?? this.defaultInvalidAccess,
-      monorepo: options.monorepo ?? {},
-      loadEnvFiles: options.loadEnvFiles || false,
-      transformers: options.transformers ?? {},
-    };
-
-    this.serverSchema = z.object(this.options.server);
-    this.clientSchema = z.object(this.options.client);
-    this.sharedSchema = z.object(this.options.shared);
-
-    this.validateClientPrefix();
+  constructor(config: EnvConfig<TServer, TClient, TShared>) {
+    this.validateClientPrefix(config);
+    
+    this.config = this.processConfig(config);
+    this.environment = this.detectEnvironment();
+    this.schema = this.buildSchema();
   }
 
-  private detectRuntimeEnv(): Record<string, unknown> {
+  private validateClientPrefix(config: EnvConfig<TServer, TClient, TShared>): void {
+    const { client } = config;
+    
+    // Skip validation if no client variables
+    if (!client || Object.keys(client).length === 0) {
+      return;
+    }
+
+    // Get framework-specific prefix if using a framework
+    const frameworkConfig = config.framework ? FRAMEWORK_CONFIGS[config.framework] : null;
+    const expectedPrefix = frameworkConfig?.clientPrefix || config.clientPrefix;
+
+    // Only validate if we have both client variables and a framework/prefix specified
+    if (expectedPrefix) {
+      for (const key of Object.keys(client)) {
+        if (!key.startsWith(expectedPrefix)) {
+          throw new Error(
+            `Client variable "${key}" must be prefixed with "${expectedPrefix}" (${config.framework || 'custom'} framework)`
+          );
+        }
+      }
+    } else if (Object.keys(client).length > 0) {
+      throw new Error('Client variables require a prefix. Set clientPrefix or use a framework.');
+    }
+  }
+
+  private processConfig(config: EnvConfig<TServer, TClient, TShared>): EnvConfig<TServer, TClient, TShared> {
+    // Get framework config if specified
+    const frameworkConfig = config.framework ? FRAMEWORK_CONFIGS[config.framework] : null;
+
+    return {
+      isServer: typeof window === 'undefined',
+      skipValidation: false,
+      emptyStringAsUndefined: false,
+      clientPrefix: config.clientPrefix || frameworkConfig?.clientPrefix || "",
+      // Override clientPrefix with framework's prefix if framework is specified
+   
+      onValidationError: (error: ZodError) => {
+        console.error('❌ Environment validation error:', error.flatten().fieldErrors);
+        throw new Error('Environment validation error');
+      },
+      onInvalidAccess: (variable: string, context: RuntimeEnvironment) => {
+        throw new Error(
+          `❌ Attempted to access server-side environment variable '${variable}' in ${context} environment`
+        );
+      },
+      ...config,
+      // Re-apply framework's clientPrefix to ensure it overrides any provided prefix
+      ...(frameworkConfig && { clientPrefix: frameworkConfig.clientPrefix }),
+    };
+  }
+
+  private detectEnvironment(): RuntimeEnvironment {
+    if (typeof Deno !== 'undefined') return 'deno';
+    if (typeof EdgeRuntime !== 'undefined') return 'edge';
+    if (typeof window !== 'undefined') return 'browser';
+    return 'node';
+  }
+
+  private buildSchema(): ZodObject<TServer & TClient & TShared> {
+    const { server = {}, client = {}, shared = {} } = this.config;
+    return z.object({
+      ...server,
+      ...client,
+      ...shared,
+    }) as ZodObject<TServer & TClient & TShared>;
+  }
+
+  private getRuntimeEnv(): Record<string, unknown> {
+    if (this.config.runtimeEnv) {
+      return this.config.runtimeEnv;
+    }
+
     let env: Record<string, unknown> = {};
 
+    // Process.env (Node.js)
     if (typeof process !== 'undefined' && process.env) {
       env = { ...env, ...process.env };
     }
 
-    if (typeof import.meta !== 'undefined' && 'env' in import.meta) {
+    // Import.meta.env (Vite/Browser)
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
       env = { ...env, ...import.meta.env };
     }
 
-    if (typeof Deno !== 'undefined' && 'env' in Deno) {
-      env = { ...env, ...Deno.env.toObject() };
-    }
-
-    if (typeof globalThis !== 'undefined' && 'ENV' in globalThis) {
-      env = { ...env, ...(globalThis as any).ENV };
+    // Transform empty strings if configured
+    if (this.config.emptyStringAsUndefined) {
+      env = Object.fromEntries(
+        Object.entries(env).filter(([_, value]) => value !== '')
+      );
     }
 
     return env;
   }
 
-  private getCurrentEnvironment(): RuntimeEnvironment {
-    if (typeof Deno !== 'undefined' && 'env' in Deno) return 'deno';
-    if (typeof window !== 'undefined') return 'browser';
-    if (typeof EdgeRuntime !== 'undefined') return 'edge';
-    return 'node';
-  }
-
-  private validateClientPrefix() {
-    if (this.options.clientPrefix) {
-      Object.keys(this.options.client).forEach(key => {
-        if (!key.startsWith(this.options.clientPrefix)) {
-          console.warn(`Skipping improperly prefixed client variable: "${key}"`);
-          throw new Error(
-            `Client environment variable "${key}" must be prefixed with "${this.options.clientPrefix}"`
-          );
-        }
-      });
-    }
-  }
-
-  private defaultValidationError(error: unknown): never {
-    console.error('❌ Validation error:', error);
-
-    if (error instanceof z.ZodError) {
-      console.error('Zod error details:', error.flatten().fieldErrors);
-    } else if (error instanceof Error) {
-      console.error('General error message:', error.message);
-    } else {
-      console.error('Unknown error type');
-    }
-
-    throw new Error('Environment validation failed.');
-  }
-
-  private defaultInvalidAccess(variable: string, context: string): never {
-    throw new Error(
-      `❌ Attempted to access ${context} environment variable "${variable}" in invalid context`
-    );
-  }
-
-  private transformEnv(env: Record<string, unknown>): Record<string, unknown> {
-    const transformed = { ...env };
-
-    if (this.options.emptyStringAsUndefined) {
-      Object.entries(transformed).forEach(([key, value]) => {
-        if (value === '') {
-          transformed[key] = undefined;
-        }
-      });
-    }
-
-    // Apply custom transformers
-    if (this.options.transformers) {
-      Object.entries(transformed).forEach(([key, value]) => {
-        if (key in this.options.transformers!) {
-          transformed[key] = this.options?.transformers?.[key]?.(value, key);
-        }
-      });
-    }
-
-    return transformed;
-  }
-
   private validateAccess(key: string): void {
-    const environment = this.getCurrentEnvironment();
-    
-    // Check if the variable is server-only (not in client or shared schemas)
-    const isServerVar = key in this.options.server && 
-      !(key in this.options.client) && 
-      !(key in this.options.shared);
+    const isServerVar = 
+      this.config.server?.[key] && 
+      !this.config.client?.[key] && 
+      !this.config.shared?.[key];
 
-    if (isServerVar && environment === 'browser') {
-      this.options.onInvalidAccess(key, environment);
+    if (isServerVar && this.environment === 'browser') {
+      this.config.onInvalidAccess?.(key, this.environment);
     }
   }
 
-  public parse() {
-    const currentEnv = this.getCurrentEnvironment();
-    const isServer = currentEnv !== 'browser';
-
-    if (!this.options.allowedEnvironments.includes(currentEnv)) {
-      throw new Error(
-        `Environment "${currentEnv}" is not allowed. Allowed environments: ${this.options.allowedEnvironments.join(
-          ', '
-        )}`
-      );
+  public parse() : Record<string, unknown> {
+    
+    if (this.config.skipValidation) {
+      return this.getRuntimeEnv() || {} ;
     }
 
-    const transformedEnv = this.transformEnv(this.options.runtimeEnv);
-
-    const schema = isServer
-      ? this.serverSchema.merge(this.clientSchema).merge(this.sharedSchema)
-      : this.clientSchema.merge(this.sharedSchema);
-
-    const result = schema.safeParse(transformedEnv);
+    const env = this.getRuntimeEnv() || {};
+    const result = this.schema.safeParse(env);
 
     if (!result.success) {
-      return this.options.onValidationError(result.error);
+      return this.config.onValidationError?.(result.error) || {};
     }
-
-    this.validationResult = { success: true };
-
-    type EnvOutput<T> = {
-      [K in keyof T]: T[K] extends ZodType ? z.infer<T[K]> : never;
-    };
 
     return new Proxy(result.data, {
-      get: (target: Record<string, unknown>, prop: string) => {
+      get: (target, prop) => {
+        if (typeof prop !== 'string') return undefined;
+        if (prop === '__esModule' || prop === '$$typeof') return undefined;
+
         this.validateAccess(prop);
-        return target[prop];
-      },
-    }) as EnvOutput<TServerSchema & TClientSchema & TSharedSchema>;
-  }
-
-  public getValidationState(): ValidationResult {
-    if (!this.validationResult) {
-      try {
-        this.parse(); // Attempt parsing, which triggers validation
-      } catch (error: unknown) {
-        if (error instanceof z.ZodError) {
-          this.validationResult = {
-            success: false,
-            errors: error.errors.map((err) => ({
-              path: err.path.map(String),
-              message: err.message,
-            })),
-          };
-        } else if (error instanceof Error) {
-          this.validationResult = {
-            success: false,
-            errors: [{ path: [], message: error.message || 'Unknown error occurred' }],
-          };
-        } else {
-          this.validationResult = {
-            success: false,
-            errors: [{ path: [], message: 'An unexpected validation error occurred' }],
-          };
+        
+        if (this.cache.has(prop)) {
+          return this.cache.get(prop);
         }
-      }
-    }
-    return this.validationResult ?? { success: true, errors: [] };
+
+        const value = Reflect.get(target, prop);
+        this.cache.set(prop, value);
+        return value;
+      },
+    });
+
   }
 
-  public setRuntimeEnv(env: Record<string, unknown>): void {
-    this.options.runtimeEnv = this.transformEnv(env);
-    this.validationResult = null; // Reset validation state
+  public getValidationState() {
+    const env = this.getRuntimeEnv();
+    const result = this.schema.safeParse(env);
+    
+    return {
+      success: result.success,
+      errors: !result.success ? result.error.flatten().fieldErrors : undefined,
+    };
   }
 }
 
+// Helper function
 export function createEnvValidator<
-  TServerSchema extends Record<string, ZodType>,
-  TClientSchema extends Record<string, ZodType>,
-  TSharedSchema extends Record<string, ZodType>
+  TServer extends Record<string, ZodType>,
+  TClient extends Record<string, ZodType>,
+  TShared extends Record<string, ZodType>,
+  TFramework extends SupportedFrameworks = SupportedFrameworks
 >(
-  options: EnvValidatorOptions<TServerSchema, TClientSchema, TSharedSchema>
+  config: Omit<EnvConfig<TServer, TClient, TShared>, 'framework'> & {
+    framework?: TFramework;
+  }
 ) {
-  return new EnvValidator(options);
+  return new EnvValidator(config);
 }
+// Framework configurations with literal types
+export const FRAMEWORK_CONFIGS = {
+  next: {
+    clientPrefix: 'NEXT_PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'edge'] as const,
+  },
+  remix: {
+    clientPrefix: 'PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'browser'] as const,
+  },
+  react: {
+    clientPrefix: 'REACT_APP_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['browser'] as const,
+  },
+  vue: {
+    clientPrefix: 'VITE_',
+    runtimeEnv: 'import.meta.env' as const,
+    allowedEnvironments: ['browser'] as const,
+  },
+  solid: {
+    clientPrefix: 'VITE_',
+    runtimeEnv: 'import.meta.env' as const,
+    allowedEnvironments: ['browser'] as const,
+  },
+  nx: {
+    clientPrefix: 'NX_PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'browser'] as const,
+  },
+  nuxt: {
+    clientPrefix: 'NUXT_PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'browser'] as const,
+  },
+  custom: {
+    clientPrefix: '',
+    runtimeEnv: 'custom' as const,
+    allowedEnvironments: ['node', 'browser', 'edge', 'deno'] as const,
+  },
+} as const;
+
+// More precise framework types
+export type SupportedFrameworks = keyof typeof FRAMEWORK_CONFIGS;
+export type FrameworkPrefix<T extends SupportedFrameworks> = typeof FRAMEWORK_CONFIGS[T]['clientPrefix'];
+export type FrameworkEnv<T extends SupportedFrameworks> = typeof FRAMEWORK_CONFIGS[T]['runtimeEnv'];
+export type FrameworkAllowedEnvs<T extends SupportedFrameworks> = typeof FRAMEWORK_CONFIGS[T]['allowedEnvironments'][number];
+
