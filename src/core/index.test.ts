@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi, SpyInstance } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+
 import { EnvValidator, createEnvValidator } from './index';
 
 describe('EnvValidator', () => {
@@ -12,7 +13,7 @@ describe('EnvValidator', () => {
     DATABASE_URL: 'postgresql://localhost:5432',
     PUBLIC_API_URL: 'https://api.example.com',
     VITE_APP_TITLE: 'Test App',
-  
+
     '': '', // Empty string test case
   };
 
@@ -21,13 +22,12 @@ describe('EnvValidator', () => {
     vi.resetModules();
     process.env = {
       ...mockEnv,
-    
+
       VITE_API_URL: 'https://vite-api.example.com',
     };
     // @ts-ignore - operand of delete must be optional , but here we are in a testing enviroment.
-    delete global.window 
+    delete global.window;
     vi.stubGlobal('import.meta', { env: {} });
-    
   });
 
   afterEach(() => {
@@ -41,9 +41,7 @@ describe('EnvValidator', () => {
 
   describe('Constructor', () => {
     it('should initialize with default options', () => {
-      const validator = new EnvValidator({
-        
-      });
+      const validator = new EnvValidator({});
       expect(validator).toBeInstanceOf(EnvValidator);
     });
 
@@ -56,14 +54,16 @@ describe('EnvValidator', () => {
       const schema = {
         client: {
           API_URL: z.string(),
-        }
+        },
       };
 
-      expect(() => new EnvValidator({
-        ...schema,
-        framework: "next",
-        
-      })).toThrow(/must be prefixed/);
+      expect(
+        () =>
+          new EnvValidator({
+            ...schema,
+            framework: 'next',
+          })
+      ).toThrow(/must be prefixed/);
     });
   });
 
@@ -80,7 +80,7 @@ describe('EnvValidator', () => {
         client: {
           VITE_APP_TITLE: z.string(),
         },
-        framework: "vue",
+        framework: 'vue',
       });
       const env = validator.parse();
       expect(env).toBeDefined();
@@ -111,12 +111,12 @@ describe('EnvValidator', () => {
     it('should validate correct environment variables', () => {
       const validator = createEnvValidator({
         ...schema,
-        framework: 'vue'
+        framework: 'vue',
       });
       const env = validator.parse();
-      expect(env["API_KEY"]).toBe('secret-key');
-      expect(env["DATABASE_URL"]).toBe('postgresql://localhost:5432');
-      expect(env["NODE_ENV"]).toBe('test');
+      expect(env['API_KEY']).toBe('secret-key');
+      expect(env['DATABASE_URL']).toBe('postgresql://localhost:5432');
+      expect(env['NODE_ENV']).toBe('test');
     });
 
     it('should handle empty strings as undefined when emptyStringAsUndefined is true', () => {
@@ -126,15 +126,16 @@ describe('EnvValidator', () => {
         emptyStringAsUndefined: true,
       });
       const env = validator.parse();
+      // @ts-expect-error - testing empty string as undefined
       expect(env['']).toBeUndefined();
     });
 
     it('should throw on invalid environment variables', () => {
-      process.env["DATABASE_URL"] = 'invalid-url';
+      process.env['DATABASE_URL'] = 'invalid-url';
       const validator = createEnvValidator({
         ...schema,
         framework: 'vue',
-        onValidationError: (error) => {
+        onValidationError: error => {
           throw error;
         },
       });
@@ -155,12 +156,12 @@ describe('EnvValidator', () => {
         framework: 'vue',
         runtimeEnv: {
           SECRET_KEY: 'secret',
-          VITE_PUBLIC_KEY: 'public'
-        }
+          VITE_PUBLIC_KEY: 'public',
+        },
       });
 
       const env = validator.parse();
-      expect(() => env["SECRET_KEY"]).toThrow();
+      expect(() => env['SECRET_KEY']).toThrow();
     });
 
     it('should allow access to all variables in server environment', () => {
@@ -174,13 +175,13 @@ describe('EnvValidator', () => {
         framework: 'vue',
         runtimeEnv: {
           SECRET_KEY: 'secret',
-          VITE_PUBLIC_KEY: 'public'
-        }
+          VITE_PUBLIC_KEY: 'public',
+        },
       });
 
       const env = validator.parse();
-      expect(env["SECRET_KEY"]).toBe('secret');
-      expect(env["VITE_PUBLIC_KEY"]).toBe('public');
+      expect(env['SECRET_KEY']).toBe('secret');
+      expect(env['VITE_PUBLIC_KEY']).toBe('public');
     });
   });
 
@@ -199,27 +200,22 @@ describe('EnvValidator', () => {
   });
 
   describe('Framework-specific behavior', () => {
- 
     it('should handle Next.js configuration', () => {
-      process.env ={
-        NEXT_PUBLIC_API_URL : "https://next-api.example.com"
-      }
+      process.env = {
+        NEXT_PUBLIC_API_URL: 'https://next-api.example.com',
+      };
 
       const validator = createEnvValidator({
-      client : {
-        NEXT_PUBLIC_API_URL : z.string(),
-      },
-      framework: "next",
-      // clientPrefix: "NEXT_PUBLIC_"
-    });
-  const env = validator.parse()
-      
-      
-      expect(env["NEXT_PUBLIC_API_URL"]).toBe('https://next-api.example.com');
-    });
-    
+        client: {
+          NEXT_PUBLIC_API_URL: z.string(),
+        },
+        framework: 'next',
+        // clientPrefix: "NEXT_PUBLIC_"
+      });
+      const env = validator.parse();
 
-    
+      expect(env['NEXT_PUBLIC_API_URL']).toBe('https://next-api.example.com');
+    });
 
     it('should handle Vite configuration', () => {
       vi.stubGlobal('import.meta', {
@@ -232,16 +228,15 @@ describe('EnvValidator', () => {
         client: {
           VITE_API_URL: z.string(),
         },
-        framework: "vue",
+        framework: 'vue',
         runtimeEnv: {
           VITE_API_URL: 'https://vite-api.example.com',
         },
       });
-      
+
       const env = validator.parse();
       expect(env['VITE_API_URL']).toBe('https://vite-api.example.com');
     });
-    
   });
 
   describe('Error Handling', () => {
@@ -268,22 +263,22 @@ describe('EnvValidator', () => {
 
       // Mock window to simulate browser environment
       global.window = {} as Window & typeof globalThis;
-      
+
       const validator = createEnvValidator({
         server: {
           SECRET_KEY: z.string(),
         },
         onInvalidAccess: customAccessHandler,
         runtimeEnv: {
-          SECRET_KEY: 'test-secret'
-        }
+          SECRET_KEY: 'test-secret',
+        },
       });
 
       const env = validator.parse();
-      
+
       // Wrap the access in a function to properly catch the error
       function accessServerVar() {
-        return env["SECRET_KEY"];
+        return env['SECRET_KEY'];
       }
 
       expect(accessServerVar).toThrow('Custom access error: SECRET_KEY in browser');
@@ -296,12 +291,12 @@ describe('EnvValidator', () => {
       // Setup process.env
       const testProcessEnv = {
         FROM_PROCESS: 'process',
-        NODE_ENV: 'test'
+        NODE_ENV: 'test',
       };
 
       // Setup import.meta.env
       const testImportMetaEnv = {
-        FROM_IMPORT_META: 'import.meta'
+        FROM_IMPORT_META: 'import.meta',
       };
 
       const validator = createEnvValidator({
@@ -312,18 +307,18 @@ describe('EnvValidator', () => {
         // Explicitly provide the merged runtime environment
         runtimeEnv: {
           ...testProcessEnv,
-          ...testImportMetaEnv
-        }
+          ...testImportMetaEnv,
+        },
       });
 
       const env = validator.parse();
-      expect(env["FROM_PROCESS"]).toBe('process');
-      expect(env["FROM_IMPORT_META"]).toBe('import.meta');
+      expect(env['FROM_PROCESS']).toBe('process');
+      expect(env['FROM_IMPORT_META']).toBe('import.meta');
     });
 
     it('should handle empty string to undefined conversion correctly', () => {
-      process.env["EMPTY_STRING"] = '';
-      process.env["NON_EMPTY"] = 'value';
+      process.env['EMPTY_STRING'] = '';
+      process.env['NON_EMPTY'] = 'value';
 
       const validator = createEnvValidator({
         server: {
@@ -334,8 +329,8 @@ describe('EnvValidator', () => {
       });
 
       const env = validator.parse();
-      expect(env["EMPTY_STRING"]).toBeUndefined();
-      expect(env["NON_EMPTY"]).toBe('value');
+      expect(env['EMPTY_STRING']).toBeUndefined();
+      expect(env['NON_EMPTY']).toBe('value');
     });
   });
 
@@ -348,23 +343,23 @@ describe('EnvValidator', () => {
       });
 
       const env = validator.parse();
-      expect(env["NODE_ENV"]).toBe('test');
+      expect(env['NODE_ENV']).toBe('test');
     });
 
     it('should handle complex schema validations', () => {
-      process.env["PORT"] = '3000';
-      process.env["FEATURE_FLAGS"] = '{"debug":true,"beta":false}';
+      process.env['PORT'] = '3000';
+      process.env['FEATURE_FLAGS'] = '{"debug":true,"beta":false}';
 
       const validator = createEnvValidator({
         server: {
           PORT: z.string().transform(val => parseInt(val, 10)),
-          FEATURE_FLAGS: z.string().transform((str) => JSON.parse(str)),
+          FEATURE_FLAGS: z.string().transform(str => JSON.parse(str)),
         },
       });
 
       const env = validator.parse();
-      expect(env["PORT"]).toBe(3000);
-      expect(env["FEATURE_FLAGS"]).toEqual({ debug: true, beta: false });
+      expect(env['PORT']).toBe(3000);
+      expect(env['FEATURE_FLAGS']).toEqual({ debug: true, beta: false });
     });
   });
 
@@ -392,7 +387,6 @@ describe('EnvValidator', () => {
         framework: {
           framework: 'next',
           allowedEnvironments: ['browser'], // Override Next.js default environments
-          
         },
         client: {
           NEXT_PUBLIC_API_URL: z.string(),
@@ -436,10 +430,9 @@ describe('EnvValidator', () => {
     it('should handle custom framework with empty prefix', () => {
       const validator = createEnvValidator({
         framework: 'custom',
-        clientPrefix: "PUBLIC_",
+        clientPrefix: 'PUBLIC_',
         client: {
           PUBLIC_API_URL: z.string(), // No prefix required for custom framework
-          
         },
         runtimeEnv: {
           PUBLIC_API_URL: 'https://api.example.com',
@@ -499,7 +492,7 @@ describe('EnvValidator', () => {
       const validator = createEnvValidator({
         server: {
           PORT: z.string().transform(Number),
-          FEATURES: z.string().transform((str) => JSON.parse(str)),
+          FEATURES: z.string().transform(str => JSON.parse(str)),
         },
         runtimeEnv: {
           PORT: '3000',
@@ -568,12 +561,12 @@ describe('EnvValidator', () => {
 });
 
 describe('NX Workspace Support', () => {
-  let mockDotenvConfig = vi.fn();
-  let mockLoadEnvFile: SpyInstance;
+  const mockDotenvConfig = vi.fn();
+  let mockLoadEnvFile: any;
 
   beforeEach(() => {
     vi.mock('dotenv', () => ({
-      config: mockDotenvConfig
+      config: mockDotenvConfig,
     }));
 
     // Create a spy on loadEnvFile
@@ -588,7 +581,7 @@ describe('NX Workspace Support', () => {
   it('should load workspace root env variables', () => {
     const mockedEnv = {
       NX_ROOT_VAR: 'root-value',
-      DATABASE_URL: 'root-db-url'
+      DATABASE_URL: 'root-db-url',
     };
 
     // Reset process.env
@@ -596,7 +589,7 @@ describe('NX Workspace Support', () => {
 
     // Mock both dotenv.config and loadEnvFile
     mockDotenvConfig.mockReturnValue({
-      parsed: mockedEnv
+      parsed: mockedEnv,
     });
 
     mockLoadEnvFile.mockImplementation((path: string) => {
@@ -609,44 +602,44 @@ describe('NX Workspace Support', () => {
         framework: 'nx',
         nxConfig: {
           workspaceRoot: '/workspace-root',
-          cascadeEnv: true
-        }
+          cascadeEnv: true,
+        },
       },
       server: {
         NX_ROOT_VAR: z.string(),
-        DATABASE_URL: z.string()
-      }
+        DATABASE_URL: z.string(),
+      },
     });
 
     const env = validator.parse();
-    
+
     expect(env['NX_ROOT_VAR']).toBe('root-value');
     expect(env['DATABASE_URL']).toBe('root-db-url');
     expect(mockLoadEnvFile).toHaveBeenCalledWith('/workspace-root');
     expect(mockDotenvConfig).toHaveBeenCalledWith({
-      path: '/workspace-root/.env'
+      path: '/workspace-root/.env',
     });
   });
 
   it('should cascade env variables correctly', () => {
     const rootEnv = {
       NX_ROOT_VAR: 'root-value',
-      DATABASE_URL: 'root-db-url'
+      DATABASE_URL: 'root-db-url',
     };
 
     const projectEnv = {
       DATABASE_URL: 'project-db-url',
-      PROJECT_SPECIFIC: 'project-value'
+      PROJECT_SPECIFIC: 'project-value',
     };
 
     // Mock root .env
     mockDotenvConfig
       .mockReturnValueOnce({
-        parsed: rootEnv
+        parsed: rootEnv,
       })
       // Mock project .env
       .mockReturnValueOnce({
-        parsed: projectEnv
+        parsed: projectEnv,
       });
 
     const validator = createEnvValidator({
@@ -655,19 +648,19 @@ describe('NX Workspace Support', () => {
         nxConfig: {
           workspaceRoot: '/workspace-root',
           projectPath: '/workspace-root/apps/my-app',
-          cascadeEnv: true
-        }
+          cascadeEnv: true,
+        },
       },
       server: {
         NX_ROOT_VAR: z.string(),
         DATABASE_URL: z.string(),
-        PROJECT_SPECIFIC: z.string()
+        PROJECT_SPECIFIC: z.string(),
       },
       // Merge the environments as they would be in reality
       runtimeEnv: {
         ...rootEnv,
-        ...projectEnv
-      }
+        ...projectEnv,
+      },
     });
 
     const env = validator.parse();
@@ -687,12 +680,12 @@ describe('NX Workspace Support', () => {
         nxConfig: {
           workspaceRoot: '/workspace-root',
           projectPath: '/workspace-root/apps/my-app',
-          cascadeEnv: true
-        }
+          cascadeEnv: true,
+        },
       },
       server: {
-        OPTIONAL_VAR: z.string().optional()
-      }
+        OPTIONAL_VAR: z.string().optional(),
+      },
     });
 
     expect(() => validator.parse()).not.toThrow();
@@ -700,11 +693,11 @@ describe('NX Workspace Support', () => {
 
   it('should respect cascadeEnv flag', () => {
     const rootEnv = {
-      ROOT_VAR: 'root-value'
+      ROOT_VAR: 'root-value',
     };
 
     const projectEnv = {
-      PROJECT_VAR: 'project-value'
+      PROJECT_VAR: 'project-value',
     };
 
     // Reset process.env
@@ -712,10 +705,10 @@ describe('NX Workspace Support', () => {
 
     mockDotenvConfig
       .mockReturnValueOnce({
-        parsed: rootEnv
+        parsed: rootEnv,
       })
       .mockReturnValueOnce({
-        parsed: projectEnv
+        parsed: projectEnv,
       });
 
     const validator = createEnvValidator({
@@ -724,14 +717,14 @@ describe('NX Workspace Support', () => {
         nxConfig: {
           workspaceRoot: '/workspace-root',
           projectPath: '/workspace-root/apps/my-app',
-          cascadeEnv: false // Disable cascading
-        }
+          cascadeEnv: false, // Disable cascading
+        },
       },
       server: {
         ROOT_VAR: z.string().optional(),
-        PROJECT_VAR: z.string()
+        PROJECT_VAR: z.string(),
       },
-      runtimeEnv: projectEnv // Only include project env since cascading is disabled
+      runtimeEnv: projectEnv, // Only include project env since cascading is disabled
     });
 
     const env = validator.parse();
@@ -742,30 +735,30 @@ describe('NX Workspace Support', () => {
   it('should handle NX public variables correctly', () => {
     const mockedEnv = {
       NX_PUBLIC_API_URL: 'https://api.example.com',
-      PRIVATE_VAR: 'secret'
+      PRIVATE_VAR: 'secret',
     };
 
     // Reset process.env
     process.env = {};
 
     mockDotenvConfig.mockReturnValue({
-      parsed: mockedEnv
+      parsed: mockedEnv,
     });
 
     const validator = createEnvValidator({
       framework: {
         framework: 'nx',
         nxConfig: {
-          projectPath: '/workspace-root/apps/my-app'
-        }
+          projectPath: '/workspace-root/apps/my-app',
+        },
       },
       client: {
-        NX_PUBLIC_API_URL: z.string()
+        NX_PUBLIC_API_URL: z.string(),
       },
       server: {
-        PRIVATE_VAR: z.string()
+        PRIVATE_VAR: z.string(),
       },
-      runtimeEnv: mockedEnv
+      runtimeEnv: mockedEnv,
     });
 
     const env = validator.parse();
@@ -776,14 +769,14 @@ describe('NX Workspace Support', () => {
   it('should validate environment access in different NX environments', () => {
     const mockedEnv = {
       SERVER_ONLY: 'secret',
-      NX_PUBLIC_VAR: 'public'
+      NX_PUBLIC_VAR: 'public',
     };
 
     // Reset process.env
     process.env = {};
 
     mockDotenvConfig.mockReturnValue({
-      parsed: mockedEnv
+      parsed: mockedEnv,
     });
 
     // Simulate browser environment
@@ -793,16 +786,16 @@ describe('NX Workspace Support', () => {
       framework: {
         framework: 'nx',
         nxConfig: {
-          projectPath: '/workspace-root/apps/my-app'
-        }
+          projectPath: '/workspace-root/apps/my-app',
+        },
       },
       server: {
-        SERVER_ONLY: z.string()
+        SERVER_ONLY: z.string(),
       },
       client: {
-        NX_PUBLIC_VAR: z.string()
+        NX_PUBLIC_VAR: z.string(),
       },
-      runtimeEnv: mockedEnv
+      runtimeEnv: mockedEnv,
     });
 
     const env = validator.parse();
@@ -813,13 +806,13 @@ describe('NX Workspace Support', () => {
   it('should handle complex NX workspace configurations', () => {
     const rootEnv = {
       NX_ROOT_VAR: 'root-value',
-      SHARED_VAR: 'root-shared'
+      SHARED_VAR: 'root-shared',
     };
 
     const projectEnv = {
       NX_PUBLIC_API_URL: 'https://project-api.example.com',
       SHARED_VAR: 'project-shared',
-      PROJECT_SPECIFIC: 'project-value'
+      PROJECT_SPECIFIC: 'project-value',
     };
 
     // Reset process.env and ensure we're in a server environment
@@ -829,10 +822,10 @@ describe('NX Workspace Support', () => {
 
     mockDotenvConfig
       .mockReturnValueOnce({
-        parsed: rootEnv
+        parsed: rootEnv,
       })
       .mockReturnValueOnce({
-        parsed: projectEnv
+        parsed: projectEnv,
       });
 
     const validator = createEnvValidator({
@@ -841,25 +834,25 @@ describe('NX Workspace Support', () => {
         nxConfig: {
           workspaceRoot: '/workspace-root',
           projectPath: '/workspace-root/apps/my-app',
-          cascadeEnv: true
-        }
+          cascadeEnv: true,
+        },
       },
       server: {
         NX_ROOT_VAR: z.string(),
         SHARED_VAR: z.string(),
-        PROJECT_SPECIFIC: z.string()
+        PROJECT_SPECIFIC: z.string(),
       },
       client: {
-        NX_PUBLIC_API_URL: z.string()
+        NX_PUBLIC_API_URL: z.string(),
       },
       runtimeEnv: {
         ...rootEnv,
-        ...projectEnv // Project env overrides root env
-      }
+        ...projectEnv, // Project env overrides root env
+      },
     });
 
     const env = validator.parse();
-    
+
     // Now we can access server variables because we're in a server environment
     expect(env['NX_ROOT_VAR']).toBe('root-value');
     expect(env['SHARED_VAR']).toBe('project-shared');

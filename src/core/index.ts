@@ -1,4 +1,4 @@
-import { z, type ZodError, type ZodType, type ZodObject } from 'zod';
+import { type ZodError, type ZodObject, type ZodType, z } from 'zod';
 
 // Type utilities
 export type Simplify<T> = { [P in keyof T]: T[P] } & {};
@@ -21,7 +21,7 @@ export interface BaseConfig {
 export interface SchemaConfig<
   TServer extends Record<string, ZodType> = Record<string, ZodType>,
   TClient extends Record<string, ZodType> = Record<string, ZodType>,
-  TShared extends Record<string, ZodType> = Record<string, ZodType>
+  TShared extends Record<string, ZodType> = Record<string, ZodType>,
 > {
   server?: TServer;
   client?: TClient;
@@ -39,11 +39,12 @@ export interface RuntimeConfig {
 export type EnvConfig<
   TServer extends Record<string, ZodType> = Record<string, ZodType>,
   TClient extends Record<string, ZodType> = Record<string, ZodType>,
-  TShared extends Record<string, ZodType> = Record<string, ZodType>
-> = BaseConfig & SchemaConfig<TServer, TClient, TShared> & {
-  runtimeEnv?: Record<string, unknown>;
-  framework?: SupportedFrameworks | FrameworkConfig;
-};
+  TShared extends Record<string, ZodType> = Record<string, ZodType>,
+> = BaseConfig &
+  SchemaConfig<TServer, TClient, TShared> & {
+    runtimeEnv?: Record<string, unknown>;
+    framework?: SupportedFrameworks | FrameworkConfig;
+  };
 
 // Framework preset configuration type
 export interface FrameworkPreset {
@@ -90,10 +91,10 @@ export const FRAMEWORK_PRESETS = {
     runtimeEnv: 'process.env' as const,
     allowedEnvironments: ['node', 'browser'] as const,
     workspaceConfig: {
-      rootEnvPath: true,      // whether to load workspace root .env
-      cascadeEnv: true,       // whether to cascade env variables
-      projectEnvPath: true,   // whether to load project-specific .env
-    }
+      rootEnvPath: true, // whether to load workspace root .env
+      cascadeEnv: true, // whether to cascade env variables
+      projectEnvPath: true, // whether to load project-specific .env
+    },
   },
   nuxt: {
     clientPrefix: 'NUXT_PUBLIC_',
@@ -109,9 +110,12 @@ export const FRAMEWORK_PRESETS = {
 
 // More precise framework types
 export type SupportedFrameworks = keyof typeof FRAMEWORK_PRESETS;
-export type FrameworkPrefix<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['clientPrefix'];
-export type FrameworkEnv<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['runtimeEnv'];
-export type FrameworkAllowedEnvs<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['allowedEnvironments'][number];
+export type FrameworkPrefix<T extends SupportedFrameworks> =
+  (typeof FRAMEWORK_PRESETS)[T]['clientPrefix'];
+export type FrameworkEnv<T extends SupportedFrameworks> =
+  (typeof FRAMEWORK_PRESETS)[T]['runtimeEnv'];
+export type FrameworkAllowedEnvs<T extends SupportedFrameworks> =
+  (typeof FRAMEWORK_PRESETS)[T]['allowedEnvironments'][number];
 
 // Add new interface for NX workspace configuration
 export interface NXWorkspaceConfig {
@@ -123,7 +127,7 @@ export interface NXWorkspaceConfig {
 export class EnvValidator<
   TServer extends Record<string, ZodType>,
   TClient extends Record<string, ZodType>,
-  TShared extends Record<string, ZodType>
+  TShared extends Record<string, ZodType>,
 > {
   private readonly config: EnvConfig<TServer, TClient, TShared>;
   private cache = new Map<string, unknown>();
@@ -132,7 +136,7 @@ export class EnvValidator<
 
   constructor(config: EnvConfig<TServer, TClient, TShared>) {
     this.validateClientPrefix(config);
-    
+
     this.config = this.processConfig(config);
     this.environment = this.detectEnvironment();
     this.schema = this.buildSchema();
@@ -140,7 +144,7 @@ export class EnvValidator<
 
   private validateClientPrefix(config: EnvConfig<TServer, TClient, TShared>): void {
     const { client } = config;
-    
+
     // Skip validation if no client variables
     if (!client || Object.keys(client).length === 0) {
       return;
@@ -163,7 +167,9 @@ export class EnvValidator<
     }
   }
 
-  private processConfig(config: EnvConfig<TServer, TClient, TShared>): EnvConfig<TServer, TClient, TShared> {
+  private processConfig(
+    config: EnvConfig<TServer, TClient, TShared>
+  ): EnvConfig<TServer, TClient, TShared> {
     // Get framework preset and potential overrides
     const frameworkConfig = this.getFrameworkConfig(config);
 
@@ -191,7 +197,10 @@ export class EnvValidator<
 
     // If framework is just a string, use preset
     if (typeof config.framework === 'string') {
-      return { ...FRAMEWORK_PRESETS[config.framework], allowedEnvironments: [...FRAMEWORK_PRESETS[config.framework].allowedEnvironments] };
+      return {
+        ...FRAMEWORK_PRESETS[config.framework],
+        allowedEnvironments: [...FRAMEWORK_PRESETS[config.framework].allowedEnvironments],
+      };
     }
 
     // If framework is a config object, merge with preset
@@ -200,7 +209,10 @@ export class EnvValidator<
       ...preset,
       ...config.framework,
       // Ensure allowedEnvironments is mutable by spreading into new array
-      allowedEnvironments: [...(preset?.allowedEnvironments || []), ...(config.framework.allowedEnvironments || [])]
+      allowedEnvironments: [
+        ...(preset?.allowedEnvironments || []),
+        ...(config.framework.allowedEnvironments || []),
+      ],
     };
   }
 
@@ -258,9 +270,7 @@ export class EnvValidator<
 
     // Transform empty strings if configured
     if (this.config.emptyStringAsUndefined) {
-      env = Object.fromEntries(
-        Object.entries(env).filter(([_, value]) => value !== '')
-      );
+      env = Object.fromEntries(Object.entries(env).filter(([_, value]) => value !== ''));
     }
 
     return env;
@@ -279,27 +289,26 @@ export class EnvValidator<
   }
 
   private validateAccess(key: string): void {
-    const isServerVar = 
-      this.config.server?.[key] && 
-      !this.config.client?.[key] && 
-      !this.config.shared?.[key];
+    const isServerVar =
+      this.config.server?.[key] && !this.config.client?.[key] && !this.config.shared?.[key];
 
     if (isServerVar && this.environment === 'browser') {
       this.config.onInvalidAccess?.(key, this.environment);
     }
   }
 
-  public parse() : Record<string, unknown> {
-    
+  public parse(): z.infer<typeof this.schema> {
     if (this.config.skipValidation) {
-      return this.getRuntimeEnv() || {} ;
+      return this.getRuntimeEnv() as z.infer<typeof this.schema>;
     }
 
     const env = this.getRuntimeEnv() || {};
     const result = this.schema.safeParse(env);
 
     if (!result.success) {
-      return this.config.onValidationError?.(result.error) || {};
+      this.config.onValidationError?.(result.error);
+      // Force throw if onValidationError doesn't
+      throw new Error('Validation failed');
     }
 
     return new Proxy(result.data, {
@@ -308,7 +317,7 @@ export class EnvValidator<
         if (prop === '__esModule' || prop === '$$typeof') return undefined;
 
         this.validateAccess(prop);
-        
+
         if (this.cache.has(prop)) {
           return this.cache.get(prop);
         }
@@ -318,13 +327,12 @@ export class EnvValidator<
         return value;
       },
     });
-
   }
 
   public getValidationState() {
     const env = this.getRuntimeEnv();
     const result = this.schema.safeParse(env);
-    
+
     return {
       success: result.success,
       errors: !result.success ? result.error.flatten().fieldErrors : undefined,
@@ -336,7 +344,7 @@ export class EnvValidator<
 export function createEnvValidator<
   TServer extends Record<string, ZodType>,
   TClient extends Record<string, ZodType>,
-  TShared extends Record<string, ZodType>
+  TShared extends Record<string, ZodType>,
 >(
   config: Omit<EnvConfig<TServer, TClient, TShared>, 'framework'> & {
     framework?: SupportedFrameworks | FrameworkConfig;
@@ -344,4 +352,3 @@ export function createEnvValidator<
 ) {
   return new EnvValidator(config);
 }
-
