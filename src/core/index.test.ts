@@ -358,13 +358,211 @@ describe('EnvValidator', () => {
       const validator = createEnvValidator({
         server: {
           PORT: z.string().transform(val => parseInt(val, 10)),
-          FEATURE_FLAGS: z.string().transform(val => JSON.parse(val)),
+          FEATURE_FLAGS: z.string().transform((str) => JSON.parse(str)),
         },
       });
 
       const env = validator.parse();
       expect(env["PORT"]).toBe(3000);
       expect(env["FEATURE_FLAGS"]).toEqual({ debug: true, beta: false });
+    });
+  });
+
+  describe('Framework Presets and Overrides', () => {
+    it('should allow overriding framework preset clientPrefix', () => {
+      const validator = createEnvValidator({
+        framework: {
+          framework: 'next',
+          clientPrefix: 'CUSTOM_PREFIX_',
+        },
+        client: {
+          CUSTOM_PREFIX_API_URL: z.string(),
+        },
+        runtimeEnv: {
+          CUSTOM_PREFIX_API_URL: 'https://api.example.com',
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['CUSTOM_PREFIX_API_URL']).toBe('https://api.example.com');
+    });
+
+    it('should allow overriding framework preset allowedEnvironments', () => {
+      const validator = createEnvValidator({
+        framework: {
+          framework: 'next',
+          allowedEnvironments: ['browser'], // Override Next.js default environments
+          
+        },
+        client: {
+          NEXT_PUBLIC_API_URL: z.string(),
+        },
+        runtimeEnv: {
+          NEXT_PUBLIC_API_URL: 'https://api.example.com',
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['NEXT_PUBLIC_API_URL']).toBe('https://api.example.com');
+    });
+
+    it('should merge allowedEnvironments when overriding', () => {
+      const validator = createEnvValidator({
+        framework: {
+          framework: 'next',
+          allowedEnvironments: ['deno'], // Add Deno to Next.js environments
+        },
+        client: {
+          NEXT_PUBLIC_API_URL: z.string(),
+        },
+        runtimeEnv: {
+          NEXT_PUBLIC_API_URL: 'https://api.example.com',
+        },
+      });
+
+      // Check if framework config has all environments
+      const frameworkConfig = (validator as any).getFrameworkConfig({
+        framework: {
+          framework: 'next',
+          allowedEnvironments: ['deno'],
+        },
+      });
+
+      expect(frameworkConfig.allowedEnvironments).toContain('node');
+      expect(frameworkConfig.allowedEnvironments).toContain('edge');
+      expect(frameworkConfig.allowedEnvironments).toContain('deno');
+    });
+
+    it('should handle custom framework with empty prefix', () => {
+      const validator = createEnvValidator({
+        framework: 'custom',
+        clientPrefix: "PUBLIC_",
+        client: {
+          PUBLIC_API_URL: z.string(), // No prefix required for custom framework
+          
+        },
+        runtimeEnv: {
+          PUBLIC_API_URL: 'https://api.example.com',
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['PUBLIC_API_URL']).toBe('https://api.example.com');
+    });
+
+    it('should validate framework-specific environment sources', () => {
+      // Mock import.meta for Vue/Vite
+      vi.stubGlobal('import.meta', {
+        env: {
+          VITE_API_URL: 'https://vite-api.example.com',
+        },
+      });
+
+      const validator = createEnvValidator({
+        framework: {
+          framework: 'vue',
+          runtimeEnv: 'import.meta.env',
+        },
+        client: {
+          VITE_API_URL: z.string(),
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['VITE_API_URL']).toBe('https://vite-api.example.com');
+    });
+
+    it('should handle multiple client prefixes in hybrid frameworks', () => {
+      const validator = createEnvValidator({
+        framework: {
+          framework: 'custom',
+          clientPrefix: 'PUBLIC_', // Primary prefix
+        },
+        client: {
+          PUBLIC_API_URL: z.string(),
+          PUBLIC_APP_NAME: z.string(),
+        },
+        runtimeEnv: {
+          PUBLIC_API_URL: 'https://api.example.com',
+          PUBLIC_APP_NAME: 'Test App',
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['PUBLIC_API_URL']).toBe('https://api.example.com');
+      expect(env['PUBLIC_APP_NAME']).toBe('Test App');
+    });
+  });
+
+  describe('Environment Variable Transformation', () => {
+    it('should transform environment variables based on schema', () => {
+      const validator = createEnvValidator({
+        server: {
+          PORT: z.string().transform(Number),
+          FEATURES: z.string().transform((str) => JSON.parse(str)),
+        },
+        runtimeEnv: {
+          PORT: '3000',
+          FEATURES: '{"debug":true,"cache":false}',
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['PORT']).toBe(3000);
+      expect(env['FEATURES']).toEqual({ debug: true, cache: false });
+    });
+
+    it('should handle optional environment variables', () => {
+      const validator = createEnvValidator({
+        server: {
+          REQUIRED: z.string(),
+          OPTIONAL: z.string().optional(),
+        },
+        runtimeEnv: {
+          REQUIRED: 'value',
+        },
+      });
+
+      const env = validator.parse();
+      expect(env['REQUIRED']).toBe('value');
+      expect(env['OPTIONAL']).toBeUndefined();
+    });
+  });
+
+  describe('Cache Behavior', () => {
+    it('should cache accessed values', () => {
+      const validator = createEnvValidator({
+        server: {
+          API_KEY: z.string(),
+        },
+        runtimeEnv: {
+          API_KEY: 'secret',
+        },
+      });
+
+      const env = validator.parse();
+      const value1 = env['API_KEY'];
+      const value2 = env['API_KEY'];
+
+      expect(value1).toBe(value2);
+      expect((validator as any).cache.has('API_KEY')).toBe(true);
+    });
+
+    it('should handle cache invalidation properly', () => {
+      const validator = createEnvValidator({
+        server: {
+          TIMESTAMP: z.string().transform(() => Date.now()),
+        },
+        runtimeEnv: {
+          TIMESTAMP: 'now',
+        },
+      });
+
+      const env = validator.parse();
+      const time1 = env['TIMESTAMP'];
+      const time2 = env['TIMESTAMP'];
+
+      expect(time1).toBe(time2); // Should return cached value
     });
   });
 });

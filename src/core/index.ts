@@ -32,7 +32,7 @@ export interface SchemaConfig<
 // Runtime environment configuration
 export interface RuntimeConfig {
   runtimeEnv?: Record<string, unknown>;
-  framework?: SupportedFrameworks;
+  framework?: SupportedFrameworks | FrameworkConfig;
 }
 
 // Combined configuration type
@@ -42,8 +42,70 @@ export type EnvConfig<
   TShared extends Record<string, ZodType> = Record<string, ZodType>
 > = BaseConfig & SchemaConfig<TServer, TClient, TShared> & {
   runtimeEnv?: Record<string, unknown>;
-  framework?: SupportedFrameworks;
+  framework?: SupportedFrameworks | FrameworkConfig;
 };
+
+// Framework preset configuration type
+export interface FrameworkPreset {
+  clientPrefix: string;
+  runtimeEnv: EnvSource;
+  allowedEnvironments: RuntimeEnvironment[];
+}
+
+// Framework configuration with overrides
+export interface FrameworkConfig extends Partial<FrameworkPreset> {
+  framework: SupportedFrameworks ;
+}
+
+// Framework presets
+export const FRAMEWORK_PRESETS = {
+  next: {
+    clientPrefix: 'NEXT_PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'edge'] as const,
+  },
+  remix: {
+    clientPrefix: 'PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'browser'] as const,
+  },
+  react: {
+    clientPrefix: 'REACT_APP_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['browser'] as const,
+  },
+  vue: {
+    clientPrefix: 'VITE_',
+    runtimeEnv: 'import.meta.env' as const,
+    allowedEnvironments: ['browser'] as const,
+  },
+  solid: {
+    clientPrefix: 'VITE_',
+    runtimeEnv: 'import.meta.env' as const,
+    allowedEnvironments: ['browser'] as const,
+  },
+  nx: {
+    clientPrefix: 'NX_PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'browser'] as const,
+  },
+  nuxt: {
+    clientPrefix: 'NUXT_PUBLIC_',
+    runtimeEnv: 'process.env' as const,
+    allowedEnvironments: ['node', 'browser'] as const,
+  },
+  custom: {
+    clientPrefix: 'PUBLIC_',
+    runtimeEnv: 'custom',
+    allowedEnvironments: ['node', 'browser', 'edge', 'deno'] as const,
+  },
+} as const;
+
+// More precise framework types
+export type SupportedFrameworks = keyof typeof FRAMEWORK_PRESETS;
+export type FrameworkPrefix<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['clientPrefix'];
+export type FrameworkEnv<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['runtimeEnv'];
+export type FrameworkAllowedEnvs<T extends SupportedFrameworks> = typeof FRAMEWORK_PRESETS[T]['allowedEnvironments'][number];
 
 export class EnvValidator<
   TServer extends Record<string, ZodType>,
@@ -70,9 +132,8 @@ export class EnvValidator<
     if (!client || Object.keys(client).length === 0) {
       return;
     }
-
     // Get framework-specific prefix if using a framework
-    const frameworkConfig = config.framework ? FRAMEWORK_CONFIGS[config.framework] : null;
+    const frameworkConfig = config.framework ? this.getFrameworkConfig(config) : null;
     const expectedPrefix = frameworkConfig?.clientPrefix || config.clientPrefix;
 
     // Only validate if we have both client variables and a framework/prefix specified
@@ -90,16 +151,14 @@ export class EnvValidator<
   }
 
   private processConfig(config: EnvConfig<TServer, TClient, TShared>): EnvConfig<TServer, TClient, TShared> {
-    // Get framework config if specified
-    const frameworkConfig = config.framework ? FRAMEWORK_CONFIGS[config.framework] : null;
+    // Get framework preset and potential overrides
+    const frameworkConfig = this.getFrameworkConfig(config);
 
     return {
       isServer: typeof window === 'undefined',
       skipValidation: false,
       emptyStringAsUndefined: false,
-      clientPrefix: config.clientPrefix || frameworkConfig?.clientPrefix || "",
-      // Override clientPrefix with framework's prefix if framework is specified
-   
+      clientPrefix: frameworkConfig?.clientPrefix ?? config.clientPrefix ?? '',
       onValidationError: (error: ZodError) => {
         console.error('❌ Environment validation error:', error.flatten().fieldErrors);
         throw new Error('Environment validation error');
@@ -110,8 +169,25 @@ export class EnvValidator<
         );
       },
       ...config,
-      // Re-apply framework's clientPrefix to ensure it overrides any provided prefix
       ...(frameworkConfig && { clientPrefix: frameworkConfig.clientPrefix }),
+    };
+  }
+
+  private getFrameworkConfig(config: EnvConfig<TServer, TClient, TShared>): FrameworkPreset | null {
+    if (!config.framework) return null;
+
+    // If framework is just a string, use preset
+    if (typeof config.framework === 'string') {
+      return { ...FRAMEWORK_PRESETS[config.framework], allowedEnvironments: [...FRAMEWORK_PRESETS[config.framework].allowedEnvironments] };
+    }
+
+    // If framework is a config object, merge with preset
+    const preset = FRAMEWORK_PRESETS[config.framework.framework];
+    return {
+      ...preset,
+      ...config.framework,
+      // Ensure allowedEnvironments is mutable by spreading into new array
+      allowedEnvironments: [...(preset?.allowedEnvironments || []), ...(config.framework.allowedEnvironments || [])]
     };
   }
 
@@ -212,66 +288,16 @@ export class EnvValidator<
   }
 }
 
-// Helper function
+// Helper function with improved type definitions
 export function createEnvValidator<
   TServer extends Record<string, ZodType>,
   TClient extends Record<string, ZodType>,
-  TShared extends Record<string, ZodType>,
-  TFramework extends SupportedFrameworks = SupportedFrameworks
+  TShared extends Record<string, ZodType>
 >(
   config: Omit<EnvConfig<TServer, TClient, TShared>, 'framework'> & {
-    framework?: TFramework;
+    framework?: SupportedFrameworks | FrameworkConfig;
   }
 ) {
   return new EnvValidator(config);
 }
-// Framework configurations with literal types
-export const FRAMEWORK_CONFIGS = {
-  next: {
-    clientPrefix: 'NEXT_PUBLIC_',
-    runtimeEnv: 'process.env' as const,
-    allowedEnvironments: ['node', 'edge'] as const,
-  },
-  remix: {
-    clientPrefix: 'PUBLIC_',
-    runtimeEnv: 'process.env' as const,
-    allowedEnvironments: ['node', 'browser'] as const,
-  },
-  react: {
-    clientPrefix: 'REACT_APP_',
-    runtimeEnv: 'process.env' as const,
-    allowedEnvironments: ['browser'] as const,
-  },
-  vue: {
-    clientPrefix: 'VITE_',
-    runtimeEnv: 'import.meta.env' as const,
-    allowedEnvironments: ['browser'] as const,
-  },
-  solid: {
-    clientPrefix: 'VITE_',
-    runtimeEnv: 'import.meta.env' as const,
-    allowedEnvironments: ['browser'] as const,
-  },
-  nx: {
-    clientPrefix: 'NX_PUBLIC_',
-    runtimeEnv: 'process.env' as const,
-    allowedEnvironments: ['node', 'browser'] as const,
-  },
-  nuxt: {
-    clientPrefix: 'NUXT_PUBLIC_',
-    runtimeEnv: 'process.env' as const,
-    allowedEnvironments: ['node', 'browser'] as const,
-  },
-  custom: {
-    clientPrefix: '',
-    runtimeEnv: 'custom' as const,
-    allowedEnvironments: ['node', 'browser', 'edge', 'deno'] as const,
-  },
-} as const;
-
-// More precise framework types
-export type SupportedFrameworks = keyof typeof FRAMEWORK_CONFIGS;
-export type FrameworkPrefix<T extends SupportedFrameworks> = typeof FRAMEWORK_CONFIGS[T]['clientPrefix'];
-export type FrameworkEnv<T extends SupportedFrameworks> = typeof FRAMEWORK_CONFIGS[T]['runtimeEnv'];
-export type FrameworkAllowedEnvs<T extends SupportedFrameworks> = typeof FRAMEWORK_CONFIGS[T]['allowedEnvironments'][number];
 
