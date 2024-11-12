@@ -6,13 +6,15 @@
     "rootDir": ".",
     "moduleResolution": "bundler",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      
     },
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": true,
     "declaration": true,
     "declarationMap": true,
+    "emitDeclarationOnly": false,
     "sourceMap": true,
     "outDir": "./dist",
     "removeComments": false,

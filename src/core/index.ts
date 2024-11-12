@@ -127,7 +127,7 @@ export interface NXWorkspaceConfig {
 export class EnvValidator<
   TServer extends Record<string, ZodType>,
   TClient extends Record<string, ZodType>,
-  TShared extends Record<string, ZodType>,
+  TShared extends Record<string, ZodType>
 > {
   private readonly config: EnvConfig<TServer, TClient, TShared>;
   private cache = new Map<string, unknown>();
@@ -297,9 +297,12 @@ export class EnvValidator<
     }
   }
 
-  public parse(): z.infer<typeof this.schema> {
+  // Update the parse method return type to be more explicit
+  public parse(): {
+    [K in keyof (TServer & TClient & TShared)]: (TServer & TClient & TShared)[K]['_output']
+  } {
     if (this.config.skipValidation) {
-      return this.getRuntimeEnv() as z.infer<typeof this.schema>;
+      return this.getRuntimeEnv() as  (TServer & TClient & TShared);
     }
 
     const env = this.getRuntimeEnv() || {};
@@ -319,12 +322,12 @@ export class EnvValidator<
         this.validateAccess(prop);
 
         if (this.cache.has(prop)) {
-          return this.cache.get(prop);
+          return this.cache.get(prop) as (TServer & TClient & TShared);
         }
 
         const value = Reflect.get(target, prop);
         this.cache.set(prop, value);
-        return value;
+        return value as (TServer & TClient & TShared);
       },
     });
   }
@@ -344,11 +347,7 @@ export class EnvValidator<
 export function createEnvValidator<
   TServer extends Record<string, ZodType>,
   TClient extends Record<string, ZodType>,
-  TShared extends Record<string, ZodType>,
->(
-  config: Omit<EnvConfig<TServer, TClient, TShared>, 'framework'> & {
-    framework?: SupportedFrameworks | FrameworkConfig;
-  }
-) {
-  return new EnvValidator(config);
+  TShared extends Record<string, ZodType> = Record<string, never>
+>(config: EnvConfig<TServer, TClient, TShared>) {
+  return new EnvValidator<TServer, TClient, TShared>(config);
 }

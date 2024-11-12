@@ -1,12 +1,15 @@
 {
-  "name": "@env-js-validate/root",
-  "version": "0.1.0",
+  "name": "env-js-validator",
+  "version": "1.0.1",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Type-safe environment validation for JavaScript/TypeScript applications",
-  "author": "Your Name",
+  "author": "Saad Bukhari",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/coodersaadi/@env-js-validate"
+    "url": "https://github.com/coodersaadi/env-js-validate"
   },
   "sideEffects": false,
   "type": "module",
@@ -17,9 +20,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",

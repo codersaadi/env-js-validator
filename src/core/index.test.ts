@@ -664,6 +664,7 @@ describe('NX Workspace Support', () => {
     });
 
     const env = validator.parse();
+  
     expect(env['NX_ROOT_VAR']).toBe('root-value');
     expect(env['DATABASE_URL']).toBe('project-db-url'); // Project value should override root
     expect(env['PROJECT_SPECIFIC']).toBe('project-value');
